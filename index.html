@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HN Live</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f6f6ef;
+            --bg-header: #ff6600;
+            --text: #000;
+            --text-muted: #828282;
+            --link: #000;
+            --link-visited: #828282;
+            --border: #e0e0e0;
+            --highlight: rgba(255, 102, 0, 0.1);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a1a;
+                --bg-header: #ff6600;
+                --text: #c9d1d9;
+                --text-muted: #8b949e;
+                --link: #c9d1d9;
+                --link-visited: #8b949e;
+                --border: #30363d;
+                --highlight: rgba(255, 102, 0, 0.15);
+            }
+        }
+
+        body {
+            font-family: Verdana, Geneva, sans-serif;
+            font-size: 10pt;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        header {
+            background: var(--bg-header);
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        header h1 {
+            font-size: 13pt;
+            font-weight: bold;
+            color: #000;
+        }
+
+        header a {
+            color: #000;
+            text-decoration: none;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            font-size: 9pt;
+            color: #000;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #00ff00;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        #feed {
+            max-width: 800px;
+            padding: 10px;
+        }
+
+        .story {
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .story.new {
+            animation: slideIn 0.3s ease-out, highlight 2s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes highlight {
+            from { background-color: var(--highlight); }
+            to { background-color: transparent; }
+        }
+
+        .story-title {
+            color: var(--link);
+            text-decoration: none;
+            line-height: 1.4;
+        }
+
+        .story-title:visited {
+            color: var(--link-visited);
+        }
+
+        .story-title:hover {
+            text-decoration: underline;
+        }
+
+        .story-domain {
+            font-size: 8pt;
+            color: var(--text-muted);
+            margin-left: 5px;
+        }
+
+        .story-meta {
+            font-size: 8pt;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .story-meta a {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .story-meta a:hover {
+            text-decoration: underline;
+        }
+
+        .loading {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1><a href="https://news.ycombinator.com/newest" target="_blank" rel="noopener">HN Live</a></h1>
+        <div class="status">
+            <span class="status-dot"></span>
+            <span>watching</span>
+        </div>
+    </header>
+
+    <main id="feed">
+        <div class="loading">Loading stories...</div>
+    </main>
+
+    <script>
+        const API = 'https://hacker-news.firebaseio.com/v0';
+        const POLL_INTERVAL = 10000;
+        const MAX_STORIES = 100;
+        const INITIAL_LOAD = 30;
+
+        const seenIds = new Set();
+        const feed = document.getElementById('feed');
+
+        function formatTimeAgo(unixTime) {
+            const seconds = Math.floor(Date.now() / 1000 - unixTime);
+            if (seconds < 60) return 'just now';
+            if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+            return `${Math.floor(seconds / 86400)} days ago`;
+        }
+
+        function extractDomain(url) {
+            if (!url) return null;
+            try {
+                return new URL(url).hostname.replace('www.', '');
+            } catch {
+                return null;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function createStoryElement(story) {
+            const article = document.createElement('article');
+            article.className = 'story';
+            article.dataset.id = story.id;
+
+            const domain = extractDomain(story.url);
+            const storyUrl = story.url || `https://news.ycombinator.com/item?id=${story.id}`;
+            const hnLink = `https://news.ycombinator.com/item?id=${story.id}`;
+
+            article.innerHTML = `
+                <div>
+                    <a class="story-title" href="${storyUrl}" target="_blank" rel="noopener">${escapeHtml(story.title)}</a>
+                    ${domain ? `<span class="story-domain">(${domain})</span>` : ''}
+                </div>
+                <div class="story-meta">
+                    ${story.score} points by ${story.by}
+                    <span class="time" data-time="${story.time}">${formatTimeAgo(story.time)}</span>
+                    | <a href="${hnLink}" target="_blank" rel="noopener">${story.descendants || 0} comments</a>
+                </div>
+            `;
+
+            return article;
+        }
+
+        function renderStory(story, animate = true) {
+            const article = createStoryElement(story);
+            if (animate) {
+                article.classList.add('new');
+                setTimeout(() => article.classList.remove('new'), 2000);
+            }
+            feed.insertBefore(article, feed.firstChild);
+
+            // Trim old stories
+            while (feed.children.length > MAX_STORIES) {
+                const last = feed.lastChild;
+                seenIds.delete(parseInt(last.dataset.id));
+                feed.removeChild(last);
+            }
+        }
+
+        async function fetchStory(id) {
+            try {
+                const res = await fetch(`${API}/item/${id}.json`);
+                const item = await res.json();
+                if (item && item.type === 'story' && !item.deleted && !item.dead) {
+                    return item;
+                }
+            } catch (e) {
+                console.warn(`Failed to fetch story ${id}:`, e);
+            }
+            return null;
+        }
+
+        async function poll() {
+            try {
+                const res = await fetch(`${API}/newstories.json`);
+                const ids = await res.json();
+
+                const newIds = ids.filter(id => !seenIds.has(id));
+
+                // Fetch new stories (limit batch size)
+                const stories = [];
+                for (const id of newIds.slice(0, 10)) {
+                    const story = await fetchStory(id);
+                    if (story) {
+                        stories.push(story);
+                        seenIds.add(id);
+                    }
+                }
+
+                // Render newest first (reverse since we prepend)
+                stories.reverse().forEach(story => renderStory(story));
+
+            } catch (e) {
+                console.error('Poll failed:', e);
+            }
+        }
+
+        async function init() {
+            try {
+                const res = await fetch(`${API}/newstories.json`);
+                const ids = await res.json();
+
+                // Load initial stories
+                const initialIds = ids.slice(0, INITIAL_LOAD);
+                const stories = [];
+
+                for (const id of initialIds) {
+                    const story = await fetchStory(id);
+                    if (story) {
+                        stories.push(story);
+                        seenIds.add(id);
+                    }
+                }
+
+                // Clear loading message
+                feed.innerHTML = '';
+
+                // Render stories (oldest first so newest ends up on top)
+                stories.reverse().forEach(story => renderStory(story, false));
+
+                // Mark remaining IDs as seen to avoid flooding on next poll
+                ids.slice(0, 100).forEach(id => seenIds.add(id));
+
+                // Start polling
+                setInterval(poll, POLL_INTERVAL);
+
+            } catch (e) {
+                feed.innerHTML = '<div class="loading">Failed to load. Please refresh.</div>';
+                console.error('Init failed:', e);
+            }
+        }
+
+        // Update timestamps periodically
+        setInterval(() => {
+            document.querySelectorAll('.time[data-time]').forEach(el => {
+                el.textContent = formatTimeAgo(parseInt(el.dataset.time));
+            });
+        }, 60000);
+
+        init();
+    </script>
+</body>
+</html>
