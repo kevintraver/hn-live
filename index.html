@@ -103,24 +103,17 @@
             overflow: hidden;
         }
 
-        .story.new {
-            animation: slideIn 0.5s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .new-stories-block {
+            overflow: hidden;
+            transition: height 0.4s ease-out, opacity 0.3s ease-out;
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .status-dot, .story.new {
+            .status-dot {
                 animation: none;
+            }
+            .new-stories-block {
+                transition: none;
             }
         }
 
@@ -258,25 +251,56 @@
             return article;
         }
 
-        function renderStories(stories, isNew) {
+        function renderStories(stories, animate = false) {
+            if (stories.length === 0) return;
+
             stories.sort((a, b) => b.time - a.time);
 
-            const fragment = document.createDocumentFragment();
+            if (animate) {
+                // Wrap new stories in animated block
+                const wrapper = document.createElement('div');
+                wrapper.className = 'new-stories-block';
 
-            for (const story of stories) {
-                const article = createStoryElement(story);
-                if (isNew) {
-                    article.classList.add('new');
+                for (const story of stories) {
+                    wrapper.appendChild(createStoryElement(story));
                 }
-                fragment.appendChild(article);
+
+                // Start collapsed
+                wrapper.style.height = '0px';
+                wrapper.style.opacity = '0';
+
+                feed.insertBefore(wrapper, feed.firstChild);
+
+                // Measure and animate
+                const targetHeight = wrapper.scrollHeight;
+                requestAnimationFrame(() => {
+                    wrapper.style.height = targetHeight + 'px';
+                    wrapper.style.opacity = '1';
+                });
+
+                // Unwrap after animation
+                setTimeout(() => {
+                    while (wrapper.firstChild) {
+                        feed.insertBefore(wrapper.firstChild, wrapper);
+                    }
+                    wrapper.remove();
+                    trimFeed();
+                }, 400);
+            } else {
+                // No animation - just insert
+                const fragment = document.createDocumentFragment();
+                for (const story of stories) {
+                    fragment.appendChild(createStoryElement(story));
+                }
+                feed.insertBefore(fragment, feed.firstChild);
+                trimFeed();
             }
+        }
 
-            feed.insertBefore(fragment, feed.firstChild);
-
-            // Trim old stories
+        function trimFeed() {
             while (feed.children.length > MAX_STORIES) {
                 const last = feed.lastChild;
-                if (last.dataset.id) {
+                if (last.dataset?.id) {
                     seenIds.delete(parseInt(last.dataset.id));
                 }
                 feed.removeChild(last);
