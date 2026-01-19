@@ -20,6 +20,7 @@
             --link-visited: #828282;
             --border: #e0e0e0;
             --highlight: rgba(255, 102, 0, 0.1);
+            --scroll-offset: 48px;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -33,6 +34,10 @@
                 --border: #30363d;
                 --highlight: rgba(255, 102, 0, 0.15);
             }
+        }
+
+        html {
+            scroll-padding-top: var(--scroll-offset);
         }
 
         body {
@@ -98,9 +103,25 @@
             overflow: hidden;
         }
 
-        .new-stories-block {
-            overflow: hidden;
-            transition: height 0.4s ease-out, opacity 0.4s ease-out;
+        .story.new {
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-dot, .story.new {
+                animation: none;
+            }
         }
 
         .story-title {
@@ -164,8 +185,31 @@
         const MAX_STORIES = 100;
         const INITIAL_LOAD = 30;
 
-        const seenIds = new Set();
+        const STORAGE_KEY = 'hn-live-state';
         const feed = document.getElementById('feed');
+
+        // Load/save state from localStorage
+        function loadState() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    return { seenIds: new Set(data.seenIds || []), newestTime: data.newestTime || 0 };
+                }
+            } catch (e) {}
+            return { seenIds: new Set(), newestTime: 0 };
+        }
+
+        function saveState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    seenIds: [...seenIds].slice(-500),
+                    newestTime
+                }));
+            } catch (e) {}
+        }
+
+        let { seenIds, newestTime } = loadState();
 
         function formatTimeAgo(unixTime) {
             const seconds = Math.floor(Date.now() / 1000 - unixTime);
@@ -214,66 +258,29 @@
             return article;
         }
 
-        function renderStory(story) {
-            const article = createStoryElement(story);
-            feed.insertBefore(article, feed.firstChild);
+        function renderStories(stories, isNew) {
+            stories.sort((a, b) => b.time - a.time);
+
+            const fragment = document.createDocumentFragment();
+
+            for (const story of stories) {
+                const article = createStoryElement(story);
+                if (isNew) {
+                    article.classList.add('new');
+                }
+                fragment.appendChild(article);
+            }
+
+            feed.insertBefore(fragment, feed.firstChild);
 
             // Trim old stories
             while (feed.children.length > MAX_STORIES) {
                 const last = feed.lastChild;
-                seenIds.delete(parseInt(last.dataset.id));
+                if (last.dataset.id) {
+                    seenIds.delete(parseInt(last.dataset.id));
+                }
                 feed.removeChild(last);
             }
-
-            return article;
-        }
-
-        function renderNewStories(stories) {
-            if (stories.length === 0) return;
-
-            // Sort newest first, render in reverse so newest ends up on top
-            stories.sort((a, b) => b.time - a.time);
-
-            // Create a wrapper for the new stories block
-            const wrapper = document.createElement('div');
-            wrapper.className = 'new-stories-block';
-
-            // Add stories to wrapper (oldest first so newest is on top)
-            for (let i = stories.length - 1; i >= 0; i--) {
-                const article = createStoryElement(stories[i]);
-                wrapper.appendChild(article);
-            }
-
-            // Start with height 0 and opacity 0
-            wrapper.style.height = '0px';
-            wrapper.style.opacity = '0';
-
-            // Insert wrapper at top of feed
-            feed.insertBefore(wrapper, feed.firstChild);
-
-            // Measure the actual height
-            const targetHeight = wrapper.scrollHeight;
-
-            // Trigger animation on next frame
-            requestAnimationFrame(() => {
-                wrapper.style.height = targetHeight + 'px';
-                wrapper.style.opacity = '1';
-            });
-
-            // After animation, unwrap stories into feed directly
-            setTimeout(() => {
-                while (wrapper.firstChild) {
-                    feed.insertBefore(wrapper.firstChild, wrapper);
-                }
-                wrapper.remove();
-
-                // Trim old stories
-                while (feed.children.length > MAX_STORIES) {
-                    const last = feed.lastChild;
-                    seenIds.delete(parseInt(last.dataset.id));
-                    feed.removeChild(last);
-                }
-            }, 450);
         }
 
         async function fetchStory(id) {
@@ -289,25 +296,32 @@
             return null;
         }
 
+        async function fetchStories(ids) {
+            const stories = await Promise.all(ids.map(fetchStory));
+            return stories.filter(Boolean);
+        }
+
         async function poll() {
             try {
                 const res = await fetch(`${API}/newstories.json`);
                 const ids = await res.json();
-
                 const newIds = ids.filter(id => !seenIds.has(id));
 
-                // Fetch new stories (limit batch size)
-                const stories = [];
-                for (const id of newIds.slice(0, 10)) {
-                    const story = await fetchStory(id);
-                    if (story) {
-                        stories.push(story);
-                        seenIds.add(id);
-                    }
-                }
+                if (newIds.length === 0) return;
 
-                // Render all new stories as a block
-                renderNewStories(stories);
+                const stories = await fetchStories(newIds.slice(0, 10));
+
+                // Mark all as seen
+                stories.forEach(story => seenIds.add(story.id));
+
+                // Only show stories NEWER than what we've displayed
+                const newStories = stories.filter(s => s.time > newestTime);
+
+                if (newStories.length > 0) {
+                    renderStories(newStories, true);
+                    newestTime = Math.max(newestTime, ...newStories.map(s => s.time));
+                    saveState();
+                }
 
             } catch (e) {
                 console.error('Poll failed:', e);
@@ -319,31 +333,22 @@
                 const res = await fetch(`${API}/newstories.json`);
                 const ids = await res.json();
 
-                // Load initial stories
                 const initialIds = ids.slice(0, INITIAL_LOAD);
-                const stories = [];
+                const stories = await fetchStories(initialIds);
 
-                for (const id of initialIds) {
-                    const story = await fetchStory(id);
-                    if (story) {
-                        stories.push(story);
-                        seenIds.add(id);
-                    }
-                }
-
-                // Clear loading message
                 feed.innerHTML = '';
 
-                // Sort by time descending (newest first), render in reverse so newest on top
-                stories.sort((a, b) => b.time - a.time);
-                for (let i = stories.length - 1; i >= 0; i--) {
-                    renderStory(stories[i]);
+                renderStories(stories, false);
+
+                // Set newestTime to most recent story
+                if (stories.length > 0) {
+                    const times = stories.map(s => s.time);
+                    newestTime = Math.max(newestTime, ...times);
                 }
 
-                // Mark remaining IDs as seen to avoid flooding on next poll
-                ids.slice(0, 100).forEach(id => seenIds.add(id));
+                ids.slice(0, MAX_STORIES).forEach(id => seenIds.add(id));
+                saveState();
 
-                // Start polling
                 setInterval(poll, POLL_INTERVAL);
 
             } catch (e) {
