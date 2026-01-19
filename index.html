@@ -230,13 +230,26 @@
             return article;
         }
 
-        function renderStory(story, animate = true) {
+        function renderStory(story, animate = true, delay = 0) {
             const article = createStoryElement(story);
+
             if (animate) {
-                article.classList.add('new');
-                setTimeout(() => article.classList.remove('new'), 2000);
+                article.style.opacity = '0';
+                article.style.maxHeight = '0';
+                article.style.padding = '0';
             }
+
             feed.insertBefore(article, feed.firstChild);
+
+            if (animate) {
+                setTimeout(() => {
+                    article.classList.add('new');
+                    article.style.opacity = '';
+                    article.style.maxHeight = '';
+                    article.style.padding = '';
+                    setTimeout(() => article.classList.remove('new'), 500);
+                }, delay);
+            }
 
             // Trim old stories
             while (feed.children.length > MAX_STORIES) {
@@ -276,8 +289,13 @@
                     }
                 }
 
-                // Sort by time and render (oldest first since we prepend)
-                stories.sort((a, b) => a.time - b.time).forEach(story => renderStory(story));
+                // Sort by time descending (newest first), then render in reverse
+                // so newest ends up on top, with staggered animations
+                stories.sort((a, b) => b.time - a.time);
+                for (let i = stories.length - 1; i >= 0; i--) {
+                    const delay = (stories.length - 1 - i) * 150;
+                    renderStory(stories[i], true, delay);
+                }
 
             } catch (e) {
                 console.error('Poll failed:', e);
@@ -304,8 +322,11 @@
                 // Clear loading message
                 feed.innerHTML = '';
 
-                // Sort by time and render (oldest first so newest ends up on top)
-                stories.sort((a, b) => a.time - b.time).forEach(story => renderStory(story, false));
+                // Sort by time descending (newest first), render in reverse so newest on top
+                stories.sort((a, b) => b.time - a.time);
+                for (let i = stories.length - 1; i >= 0; i--) {
+                    renderStory(stories[i], false);
+                }
 
                 // Mark remaining IDs as seen to avoid flooding on next poll
                 ids.slice(0, 100).forEach(id => seenIds.add(id));
