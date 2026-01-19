@@ -157,6 +157,28 @@
             text-align: center;
             color: var(--text-muted);
         }
+
+        #load-more {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--text-muted);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -171,15 +193,21 @@
     <main id="feed">
         <div class="loading">Loading stories...</div>
     </main>
+    <div id="load-more"></div>
 
     <script>
         const API = 'https://hacker-news.firebaseio.com/v0';
         const POLL_INTERVAL = 10000;
-        const MAX_STORIES = 100;
         const INITIAL_LOAD = 30;
+        const LOAD_MORE_COUNT = 20;
 
         const STORAGE_KEY = 'hn-live-state';
         const feed = document.getElementById('feed');
+        const loadMoreEl = document.getElementById('load-more');
+
+        let allStoryIds = [];
+        let loadedIndex = 0;
+        let isLoadingMore = false;
 
         function loadState() {
             const defaultState = { seenIds: new Set(), newestTime: 0, cachedStories: [] };
@@ -303,7 +331,6 @@
                         feed.insertBefore(wrapper.firstChild, wrapper);
                     }
                     wrapper.remove();
-                    trimFeed();
                 }, 400);
             } else {
                 // No animation - just insert
@@ -312,18 +339,15 @@
                     fragment.appendChild(createStoryElement(story));
                 }
                 feed.insertBefore(fragment, feed.firstChild);
-                trimFeed();
             }
         }
 
-        function trimFeed() {
-            while (feed.children.length > MAX_STORIES) {
-                const last = feed.lastChild;
-                if (last.dataset.id) {
-                    seenIds.delete(parseInt(last.dataset.id));
-                }
-                last.remove();
+        function appendStories(stories) {
+            const fragment = document.createDocumentFragment();
+            for (const story of stories) {
+                fragment.appendChild(createStoryElement(story));
             }
+            feed.appendChild(fragment);
         }
 
         async function fetchStory(id) {
@@ -370,6 +394,36 @@
             }
         }
 
+        async function loadMore() {
+            if (isLoadingMore || loadedIndex >= allStoryIds.length) return;
+
+            isLoadingMore = true;
+            loadMoreEl.innerHTML = '<span class="spinner"></span>Loading more...';
+
+            const nextIds = allStoryIds.slice(loadedIndex, loadedIndex + LOAD_MORE_COUNT);
+            const stories = await fetchStories(nextIds);
+
+            appendStories(stories);
+            loadedIndex += LOAD_MORE_COUNT;
+
+            for (const story of stories) {
+                seenIds.add(story.id);
+            }
+
+            isLoadingMore = false;
+            loadMoreEl.innerHTML = loadedIndex >= allStoryIds.length ? 'No more stories' : '';
+        }
+
+        function setupInfiniteScroll() {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting && !isLoadingMore) {
+                    loadMore();
+                }
+            }, { rootMargin: '200px' });
+
+            observer.observe(loadMoreEl);
+        }
+
         async function init() {
             if (cachedStories.length > 0) {
                 feed.innerHTML = '';
@@ -380,7 +434,9 @@
                 const res = await fetch(`${API}/newstories.json`);
                 const ids = await res.json();
 
+                allStoryIds = ids;
                 const stories = await fetchStories(ids.slice(0, INITIAL_LOAD));
+                loadedIndex = INITIAL_LOAD;
 
                 feed.innerHTML = '';
                 renderStories(stories, false);
@@ -389,7 +445,7 @@
                     newestTime = Math.max(newestTime, ...stories.map(s => s.time));
                 }
 
-                for (const id of ids.slice(0, MAX_STORIES)) {
+                for (const id of ids.slice(0, INITIAL_LOAD)) {
                     seenIds.add(id);
                 }
 
@@ -403,6 +459,7 @@
             }
 
             setInterval(poll, POLL_INTERVAL);
+            setupInfiniteScroll();
         }
 
         setInterval(() => {
