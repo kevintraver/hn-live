@@ -95,26 +95,28 @@
         .story {
             padding: 8px 0;
             border-bottom: 1px solid var(--border);
+            overflow: hidden;
         }
 
         .story.new {
-            animation: slideIn 0.3s ease-out, highlight 2s ease-out;
+            animation: slideIn 0.4s ease-out forwards;
         }
 
         @keyframes slideIn {
             from {
                 opacity: 0;
-                transform: translateY(-10px);
+                max-height: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                transform: translateY(-20px);
             }
             to {
                 opacity: 1;
+                max-height: 100px;
+                padding-top: 8px;
+                padding-bottom: 8px;
                 transform: translateY(0);
             }
-        }
-
-        @keyframes highlight {
-            from { background-color: var(--highlight); }
-            to { background-color: transparent; }
         }
 
         .story-title {
