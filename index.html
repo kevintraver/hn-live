@@ -181,47 +181,52 @@
         const STORAGE_KEY = 'hn-live-state';
         const feed = document.getElementById('feed');
 
-        // Load/save state from localStorage
         function loadState() {
+            const defaultState = { seenIds: new Set(), newestTime: 0, cachedStories: [] };
             try {
                 const saved = localStorage.getItem(STORAGE_KEY);
-                if (saved) {
-                    const data = JSON.parse(saved);
-                    return {
-                        seenIds: new Set(data.seenIds || []),
-                        newestTime: data.newestTime || 0,
-                        cachedStories: data.cachedStories || []
-                    };
-                }
-            } catch (e) {}
-            return { seenIds: new Set(), newestTime: 0, cachedStories: [] };
+                if (!saved) return defaultState;
+
+                const data = JSON.parse(saved);
+                return {
+                    seenIds: new Set(data.seenIds || []),
+                    newestTime: data.newestTime || 0,
+                    cachedStories: data.cachedStories || []
+                };
+            } catch (e) {
+                console.warn('Failed to load state:', e);
+                return defaultState;
+            }
         }
 
         function saveState(stories = null) {
             try {
                 const data = {
                     seenIds: [...seenIds].slice(-500),
-                    newestTime
-                };
-                // Save stories if provided
-                if (stories) {
-                    data.cachedStories = stories.slice(0, 50).map(s => ({
+                    newestTime,
+                    cachedStories: stories ? stories.slice(0, 50).map(s => ({
                         id: s.id, title: s.title, url: s.url, by: s.by,
                         time: s.time, score: s.score, descendants: s.descendants
-                    }));
-                }
+                    })) : undefined
+                };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            } catch (e) {}
+            } catch (e) {
+                console.warn('Failed to save state:', e);
+            }
         }
 
         let { seenIds, newestTime, cachedStories } = loadState();
 
         function formatTimeAgo(unixTime) {
             const seconds = Math.floor(Date.now() / 1000 - unixTime);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(seconds / 3600);
+            const days = Math.floor(seconds / 86400);
+
             if (seconds < 60) return 'just now';
-            if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
-            if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
-            return `${Math.floor(seconds / 86400)} days ago`;
+            if (minutes < 60) return `${minutes} minutes ago`;
+            if (hours < 24) return `${hours} hours ago`;
+            return `${days} days ago`;
         }
 
         function extractDomain(url) {
@@ -245,18 +250,20 @@
             article.dataset.id = story.id;
 
             const domain = extractDomain(story.url);
-            const storyUrl = story.url || `https://news.ycombinator.com/item?id=${story.id}`;
             const hnLink = `https://news.ycombinator.com/item?id=${story.id}`;
+            const storyUrl = story.url || hnLink;
+            const domainSpan = domain ? `<span class="story-domain">(${domain})</span>` : '';
+            const commentCount = story.descendants || 0;
 
             article.innerHTML = `
                 <div>
                     <a class="story-title" href="${storyUrl}" target="_blank" rel="noopener">${escapeHtml(story.title)}</a>
-                    ${domain ? `<span class="story-domain">(${domain})</span>` : ''}
+                    ${domainSpan}
                 </div>
                 <div class="story-meta">
                     ${story.score} points by ${story.by}
                     <span class="time" data-time="${story.time}">${formatTimeAgo(story.time)}</span>
-                    | <a href="${hnLink}" target="_blank" rel="noopener">${story.descendants || 0} comments</a>
+                    | <a href="${hnLink}" target="_blank" rel="noopener">${commentCount} comments</a>
                 </div>
             `;
 
@@ -312,10 +319,10 @@
         function trimFeed() {
             while (feed.children.length > MAX_STORIES) {
                 const last = feed.lastChild;
-                if (last.dataset?.id) {
+                if (last.dataset.id) {
                     seenIds.delete(parseInt(last.dataset.id));
                 }
-                feed.removeChild(last);
+                last.remove();
             }
         }
 
@@ -323,13 +330,12 @@
             try {
                 const res = await fetch(`${API}/item/${id}.json`);
                 const item = await res.json();
-                if (item && item.type === 'story' && !item.deleted && !item.dead) {
-                    return item;
-                }
+                const isValidStory = item && item.type === 'story' && !item.deleted && !item.dead;
+                return isValidStory ? item : null;
             } catch (e) {
                 console.warn(`Failed to fetch story ${id}:`, e);
+                return null;
             }
-            return null;
         }
 
         async function fetchStories(ids) {
@@ -347,27 +353,24 @@
 
                 const stories = await fetchStories(newIds.slice(0, 10));
 
-                // Mark all as seen
-                stories.forEach(story => seenIds.add(story.id));
+                for (const story of stories) {
+                    seenIds.add(story.id);
+                }
 
-                // Only show stories NEWER than what we've displayed
                 const newStories = stories.filter(s => s.time > newestTime);
 
                 if (newStories.length > 0) {
                     renderStories(newStories, true);
                     newestTime = Math.max(newestTime, ...newStories.map(s => s.time));
-                    // Update cache with new stories prepended
                     cachedStories = [...newStories, ...cachedStories].slice(0, 50);
                     saveState(cachedStories);
                 }
-
             } catch (e) {
                 console.error('Poll failed:', e);
             }
         }
 
         async function init() {
-            // Show cached stories immediately
             if (cachedStories.length > 0) {
                 feed.innerHTML = '';
                 renderStories(cachedStories, false);
@@ -377,41 +380,35 @@
                 const res = await fetch(`${API}/newstories.json`);
                 const ids = await res.json();
 
-                const initialIds = ids.slice(0, INITIAL_LOAD);
-                const stories = await fetchStories(initialIds);
+                const stories = await fetchStories(ids.slice(0, INITIAL_LOAD));
 
-                // Replace feed with fresh stories
                 feed.innerHTML = '';
                 renderStories(stories, false);
 
-                // Set newestTime to most recent story
                 if (stories.length > 0) {
-                    const times = stories.map(s => s.time);
-                    newestTime = Math.max(newestTime, ...times);
+                    newestTime = Math.max(newestTime, ...stories.map(s => s.time));
                 }
 
-                ids.slice(0, MAX_STORIES).forEach(id => seenIds.add(id));
+                for (const id of ids.slice(0, MAX_STORIES)) {
+                    seenIds.add(id);
+                }
+
                 cachedStories = stories;
                 saveState(stories);
-
-                setInterval(poll, POLL_INTERVAL);
-
             } catch (e) {
-                // If fetch fails but we have cache, keep showing it
                 if (cachedStories.length === 0) {
                     feed.innerHTML = '<div class="loading">Failed to load. Please refresh.</div>';
                 }
                 console.error('Init failed:', e);
-                // Still start polling to retry
-                setInterval(poll, POLL_INTERVAL);
             }
+
+            setInterval(poll, POLL_INTERVAL);
         }
 
-        // Update timestamps periodically
         setInterval(() => {
-            document.querySelectorAll('.time[data-time]').forEach(el => {
+            for (const el of document.querySelectorAll('.time[data-time]')) {
                 el.textContent = formatTimeAgo(parseInt(el.dataset.time));
-            });
+            }
         }, 60000);
 
         init();
