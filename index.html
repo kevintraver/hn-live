@@ -100,16 +100,7 @@
 
         .new-stories-block {
             overflow: hidden;
-            max-height: 0;
-            opacity: 0;
-            transform: translateY(-20px);
-            transition: all 0.4s ease-out;
-        }
-
-        .new-stories-block.visible {
-            max-height: 2000px;
-            opacity: 1;
-            transform: translateY(0);
+            transition: height 0.4s ease-out, opacity 0.4s ease-out;
         }
 
         .story-title {
@@ -253,12 +244,20 @@
                 wrapper.appendChild(article);
             }
 
+            // Start with height 0 and opacity 0
+            wrapper.style.height = '0px';
+            wrapper.style.opacity = '0';
+
             // Insert wrapper at top of feed
             feed.insertBefore(wrapper, feed.firstChild);
 
-            // Trigger animation
+            // Measure the actual height
+            const targetHeight = wrapper.scrollHeight;
+
+            // Trigger animation on next frame
             requestAnimationFrame(() => {
-                wrapper.classList.add('visible');
+                wrapper.style.height = targetHeight + 'px';
+                wrapper.style.opacity = '1';
             });
 
             // After animation, unwrap stories into feed directly
@@ -274,7 +273,7 @@
                     seenIds.delete(parseInt(last.dataset.id));
                     feed.removeChild(last);
                 }
-            }, 500);
+            }, 450);
         }
 
         async function fetchStory(id) {
