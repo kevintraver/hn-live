@@ -101,6 +101,7 @@
             padding: 8px 0;
             border-bottom: 1px solid var(--border);
             overflow: hidden;
+            scroll-margin-top: var(--scroll-offset);
         }
 
         .new-stories-block {
@@ -113,6 +114,9 @@
                 animation: none;
             }
             .new-stories-block {
+                transition: none;
+            }
+            .new-stories-chip {
                 transition: none;
             }
         }
@@ -158,6 +162,40 @@
             color: var(--text-muted);
         }
 
+        .new-stories-chip {
+            position: fixed;
+            top: calc(var(--scroll-offset) + 8px);
+            left: 50%;
+            transform: translateX(-50%) translateY(-6px);
+            background: var(--bg-header);
+            color: #000;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 9pt;
+            font-weight: bold;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            z-index: 90;
+        }
+
+        .new-stories-chip.is-visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+            pointer-events: auto;
+        }
+
+        .new-stories-chip:hover {
+            filter: brightness(0.95);
+        }
+
+        .new-stories-chip:focus-visible {
+            outline: 2px solid #000;
+            outline-offset: 2px;
+        }
+
         #load-more {
             padding: 20px;
             text-align: center;
@@ -190,6 +228,10 @@
         </div>
     </header>
 
+    <button id="new-stories-chip" class="new-stories-chip" type="button" aria-live="polite" aria-atomic="true" aria-hidden="true">
+        New stories (0)
+    </button>
+
     <main id="feed">
         <div class="loading">Loading stories...</div>
     </main>
@@ -200,14 +242,19 @@
         const POLL_INTERVAL = 10000;
         const INITIAL_LOAD = 30;
         const LOAD_MORE_COUNT = 20;
+        const AUTO_SCROLL_THRESHOLD = 80;
+        const SCROLL_OFFSET = 48;
 
         const STORAGE_KEY = 'hn-live-state';
         const feed = document.getElementById('feed');
         const loadMoreEl = document.getElementById('load-more');
+        const newStoriesChip = document.getElementById('new-stories-chip');
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
         let allStoryIds = [];
         let loadedIndex = 0;
         let isLoadingMore = false;
+        let pendingNewCount = 0;
 
         function loadState() {
             const defaultState = { seenIds: new Set(), newestTime: 0, cachedStories: [] };
@@ -270,6 +317,51 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function getScrollBehavior() {
+            return prefersReducedMotion.matches ? 'auto' : 'smooth';
+        }
+
+        function isNearTop() {
+            return window.scrollY <= AUTO_SCROLL_THRESHOLD;
+        }
+
+        function getAnchorStory() {
+            const stories = feed.querySelectorAll('.story');
+            for (const story of stories) {
+                const rect = story.getBoundingClientRect();
+                if (rect.bottom > SCROLL_OFFSET) {
+                    return story;
+                }
+            }
+            return stories[0] || null;
+        }
+
+        function updateNewStoriesChip() {
+            if (pendingNewCount > 0 && !isNearTop()) {
+                newStoriesChip.textContent = `New stories (${pendingNewCount})`;
+                newStoriesChip.classList.add('is-visible');
+                newStoriesChip.setAttribute('aria-hidden', 'false');
+                return;
+            }
+
+            newStoriesChip.classList.remove('is-visible');
+            newStoriesChip.setAttribute('aria-hidden', 'true');
+        }
+
+        function clearPendingNewStories() {
+            pendingNewCount = 0;
+            updateNewStoriesChip();
+        }
+
+        function scrollToNewest() {
+            const newestStory = feed.querySelector('.story');
+            if (newestStory) {
+                newestStory.scrollIntoView({ behavior: getScrollBehavior(), block: 'start' });
+                return;
+            }
+            window.scrollTo({ top: 0, behavior: getScrollBehavior() });
         }
 
         function createStoryElement(story) {
@@ -384,7 +476,29 @@
                 const newStories = stories.filter(s => s.time > newestTime);
 
                 if (newStories.length > 0) {
-                    renderStories(newStories, true);
+                    const shouldAutoScroll = isNearTop();
+                    const anchor = shouldAutoScroll ? null : getAnchorStory();
+                    const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+
+                    renderStories(newStories, shouldAutoScroll);
+
+                    if (shouldAutoScroll) {
+                        clearPendingNewStories();
+                        scrollToNewest();
+                    } else {
+                        pendingNewCount += newStories.length;
+                        updateNewStoriesChip();
+                        if (anchor) {
+                            requestAnimationFrame(() => {
+                                const newTop = anchor.getBoundingClientRect().top;
+                                const delta = newTop - anchorTop;
+                                if (delta !== 0) {
+                                    window.scrollBy(0, delta);
+                                }
+                            });
+                        }
+                    }
+
                     newestTime = Math.max(newestTime, ...newStories.map(s => s.time));
                     cachedStories = [...newStories, ...cachedStories].slice(0, 50);
                     saveState(cachedStories);
@@ -423,6 +537,19 @@
 
             observer.observe(loadMoreEl);
         }
+
+        newStoriesChip.addEventListener('click', () => {
+            clearPendingNewStories();
+            scrollToNewest();
+        });
+
+        window.addEventListener('scroll', () => {
+            if (isNearTop() && pendingNewCount > 0) {
+                clearPendingNewStories();
+                return;
+            }
+            updateNewStoriesChip();
+        });
 
         async function init() {
             if (cachedStories.length > 0) {
