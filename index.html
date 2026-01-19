@@ -98,25 +98,18 @@
             overflow: hidden;
         }
 
-        .story.new {
-            animation: slideIn 0.4s ease-out forwards;
+        .new-stories-block {
+            overflow: hidden;
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.4s ease-out;
         }
 
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                max-height: 0;
-                padding-top: 0;
-                padding-bottom: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                max-height: 100px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                transform: translateY(0);
-            }
+        .new-stories-block.visible {
+            max-height: 2000px;
+            opacity: 1;
+            transform: translateY(0);
         }
 
         .story-title {
@@ -230,26 +223,9 @@
             return article;
         }
 
-        function renderStory(story, animate = true, delay = 0) {
+        function renderStory(story) {
             const article = createStoryElement(story);
-
-            if (animate) {
-                article.style.opacity = '0';
-                article.style.maxHeight = '0';
-                article.style.padding = '0';
-            }
-
             feed.insertBefore(article, feed.firstChild);
-
-            if (animate) {
-                setTimeout(() => {
-                    article.classList.add('new');
-                    article.style.opacity = '';
-                    article.style.maxHeight = '';
-                    article.style.padding = '';
-                    setTimeout(() => article.classList.remove('new'), 500);
-                }, delay);
-            }
 
             // Trim old stories
             while (feed.children.length > MAX_STORIES) {
@@ -257,6 +233,48 @@
                 seenIds.delete(parseInt(last.dataset.id));
                 feed.removeChild(last);
             }
+
+            return article;
+        }
+
+        function renderNewStories(stories) {
+            if (stories.length === 0) return;
+
+            // Sort newest first, render in reverse so newest ends up on top
+            stories.sort((a, b) => b.time - a.time);
+
+            // Create a wrapper for the new stories block
+            const wrapper = document.createElement('div');
+            wrapper.className = 'new-stories-block';
+
+            // Add stories to wrapper (oldest first so newest is on top)
+            for (let i = stories.length - 1; i >= 0; i--) {
+                const article = createStoryElement(stories[i]);
+                wrapper.appendChild(article);
+            }
+
+            // Insert wrapper at top of feed
+            feed.insertBefore(wrapper, feed.firstChild);
+
+            // Trigger animation
+            requestAnimationFrame(() => {
+                wrapper.classList.add('visible');
+            });
+
+            // After animation, unwrap stories into feed directly
+            setTimeout(() => {
+                while (wrapper.firstChild) {
+                    feed.insertBefore(wrapper.firstChild, wrapper);
+                }
+                wrapper.remove();
+
+                // Trim old stories
+                while (feed.children.length > MAX_STORIES) {
+                    const last = feed.lastChild;
+                    seenIds.delete(parseInt(last.dataset.id));
+                    feed.removeChild(last);
+                }
+            }, 500);
         }
 
         async function fetchStory(id) {
@@ -289,13 +307,8 @@
                     }
                 }
 
-                // Sort by time descending (newest first), then render in reverse
-                // so newest ends up on top, with staggered animations
-                stories.sort((a, b) => b.time - a.time);
-                for (let i = stories.length - 1; i >= 0; i--) {
-                    const delay = (stories.length - 1 - i) * 150;
-                    renderStory(stories[i], true, delay);
-                }
+                // Render all new stories as a block
+                renderNewStories(stories);
 
             } catch (e) {
                 console.error('Poll failed:', e);
@@ -325,7 +338,7 @@
                 // Sort by time descending (newest first), render in reverse so newest on top
                 stories.sort((a, b) => b.time - a.time);
                 for (let i = stories.length - 1; i >= 0; i--) {
-                    renderStory(stories[i], false);
+                    renderStory(stories[i]);
                 }
 
                 // Mark remaining IDs as seen to avoid flooding on next poll
