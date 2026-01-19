@@ -274,8 +274,8 @@
                     }
                 }
 
-                // Render newest first (reverse since we prepend)
-                stories.reverse().forEach(story => renderStory(story));
+                // Sort by time and render (oldest first since we prepend)
+                stories.sort((a, b) => a.time - b.time).forEach(story => renderStory(story));
 
             } catch (e) {
                 console.error('Poll failed:', e);
@@ -302,8 +302,8 @@
                 // Clear loading message
                 feed.innerHTML = '';
 
-                // Render stories (oldest first so newest ends up on top)
-                stories.reverse().forEach(story => renderStory(story, false));
+                // Sort by time and render (oldest first so newest ends up on top)
+                stories.sort((a, b) => a.time - b.time).forEach(story => renderStory(story, false));
 
                 // Mark remaining IDs as seen to avoid flooding on next poll
                 ids.slice(0, 100).forEach(id => seenIds.add(id));
