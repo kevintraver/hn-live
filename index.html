@@ -187,22 +187,34 @@
                 const saved = localStorage.getItem(STORAGE_KEY);
                 if (saved) {
                     const data = JSON.parse(saved);
-                    return { seenIds: new Set(data.seenIds || []), newestTime: data.newestTime || 0 };
+                    return {
+                        seenIds: new Set(data.seenIds || []),
+                        newestTime: data.newestTime || 0,
+                        cachedStories: data.cachedStories || []
+                    };
                 }
             } catch (e) {}
-            return { seenIds: new Set(), newestTime: 0 };
+            return { seenIds: new Set(), newestTime: 0, cachedStories: [] };
         }
 
-        function saveState() {
+        function saveState(stories = null) {
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                const data = {
                     seenIds: [...seenIds].slice(-500),
                     newestTime
-                }));
+                };
+                // Save stories if provided
+                if (stories) {
+                    data.cachedStories = stories.slice(0, 50).map(s => ({
+                        id: s.id, title: s.title, url: s.url, by: s.by,
+                        time: s.time, score: s.score, descendants: s.descendants
+                    }));
+                }
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
             } catch (e) {}
         }
 
-        let { seenIds, newestTime } = loadState();
+        let { seenIds, newestTime, cachedStories } = loadState();
 
         function formatTimeAgo(unixTime) {
             const seconds = Math.floor(Date.now() / 1000 - unixTime);
@@ -344,7 +356,9 @@
                 if (newStories.length > 0) {
                     renderStories(newStories, true);
                     newestTime = Math.max(newestTime, ...newStories.map(s => s.time));
-                    saveState();
+                    // Update cache with new stories prepended
+                    cachedStories = [...newStories, ...cachedStories].slice(0, 50);
+                    saveState(cachedStories);
                 }
 
             } catch (e) {
@@ -353,6 +367,12 @@
         }
 
         async function init() {
+            // Show cached stories immediately
+            if (cachedStories.length > 0) {
+                feed.innerHTML = '';
+                renderStories(cachedStories, false);
+            }
+
             try {
                 const res = await fetch(`${API}/newstories.json`);
                 const ids = await res.json();
@@ -360,8 +380,8 @@
                 const initialIds = ids.slice(0, INITIAL_LOAD);
                 const stories = await fetchStories(initialIds);
 
+                // Replace feed with fresh stories
                 feed.innerHTML = '';
-
                 renderStories(stories, false);
 
                 // Set newestTime to most recent story
@@ -371,13 +391,19 @@
                 }
 
                 ids.slice(0, MAX_STORIES).forEach(id => seenIds.add(id));
-                saveState();
+                cachedStories = stories;
+                saveState(stories);
 
                 setInterval(poll, POLL_INTERVAL);
 
             } catch (e) {
-                feed.innerHTML = '<div class="loading">Failed to load. Please refresh.</div>';
+                // If fetch fails but we have cache, keep showing it
+                if (cachedStories.length === 0) {
+                    feed.innerHTML = '<div class="loading">Failed to load. Please refresh.</div>';
+                }
                 console.error('Init failed:', e);
+                // Still start polling to retry
+                setInterval(poll, POLL_INTERVAL);
             }
         }
 
