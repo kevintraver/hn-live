@@ -267,11 +267,11 @@
         </div>
     </header>
 
-    <button id="new-stories-chip" class="new-stories-chip" type="button" aria-live="polite" aria-atomic="true" aria-hidden="true">
-        New stories (0)
+    <button id="new-stories-chip" class="new-stories-chip" type="button" aria-live="polite" aria-atomic="true">
+        New stories
     </button>
 
-    <main id="feed" aria-live="polite" tabindex="-1">
+    <main id="feed" tabindex="-1">
         <div class="loading">Loading stories&hellip;</div>
     </main>
     <div id="load-more"></div>
@@ -302,9 +302,17 @@
                 if (!saved) return defaultState;
 
                 const data = JSON.parse(saved);
+                let savedNewestTime = data.newestTime || 0;
+
+                // Reset if newestTime is in the future (clock skew protection)
+                const now = Math.floor(Date.now() / 1000);
+                if (savedNewestTime > now + 3600) {
+                    savedNewestTime = 0;
+                }
+
                 return {
                     seenIds: new Set(data.seenIds || []),
-                    newestTime: data.newestTime || 0,
+                    newestTime: savedNewestTime,
                     cachedStories: data.cachedStories || []
                 };
             } catch (e) {
@@ -316,7 +324,7 @@
         function saveState(stories = null) {
             try {
                 const data = {
-                    seenIds: [...seenIds].slice(-500),
+                    seenIds: [...seenIds].slice(-1000),
                     newestTime,
                     cachedStories: stories ? stories.slice(0, 50).map(s => ({
                         id: s.id, title: s.title, url: s.url, by: s.by,
@@ -384,12 +392,11 @@
             if (pendingNewCount > 0 && !isNearTop()) {
                 newStoriesChip.textContent = `New stories (${pendingNewCount})`;
                 newStoriesChip.classList.add('is-visible');
-                newStoriesChip.setAttribute('aria-hidden', 'false');
                 return;
             }
 
+            newStoriesChip.textContent = 'New stories';
             newStoriesChip.classList.remove('is-visible');
-            newStoriesChip.setAttribute('aria-hidden', 'true');
         }
 
         function clearPendingNewStories() {
@@ -477,13 +484,17 @@
             feed.appendChild(fragment);
         }
 
-        async function fetchStory(id) {
+        async function fetchStory(id, retries = 2) {
             try {
                 const res = await fetch(`${API}/item/${id}.json`);
                 const item = await res.json();
                 const isValidStory = item && item.type === 'story' && !item.deleted && !item.dead;
                 return isValidStory ? item : null;
             } catch (e) {
+                if (retries > 0) {
+                    await new Promise(r => setTimeout(r, 1000 * (3 - retries)));
+                    return fetchStory(id, retries - 1);
+                }
                 console.warn(`Failed to fetch story ${id}:`, e);
                 return null;
             }
@@ -605,10 +616,9 @@
 
                 if (stories.length > 0) {
                     newestTime = Math.max(newestTime, ...stories.map(s => s.time));
-                }
-
-                for (const id of ids.slice(0, INITIAL_LOAD)) {
-                    seenIds.add(id);
+                    for (const story of stories) {
+                        seenIds.add(story.id);
+                    }
                 }
 
                 cachedStories = stories;
