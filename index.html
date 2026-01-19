@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f6f6ef" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
     <title>HN Live</title>
     <style>
         * {
@@ -34,10 +36,14 @@
                 --border: #30363d;
                 --highlight: rgba(255, 102, 0, 0.15);
             }
+            html {
+                color-scheme: dark;
+            }
         }
 
         html {
             scroll-padding-top: var(--scroll-offset);
+            color-scheme: light;
         }
 
         body {
@@ -46,6 +52,26 @@
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(0, 0, 0, 0.15);
+        }
+
+        .skip-link {
+            position: absolute;
+            left: 12px;
+            top: -40px;
+            padding: 6px 10px;
+            background: var(--bg-header);
+            color: #000;
+            text-decoration: none;
+            border-radius: 4px;
+            z-index: 200;
+        }
+
+        .skip-link:focus-visible {
+            top: 8px;
+            outline: 2px solid #000;
+            outline-offset: 2px;
         }
 
         header {
@@ -63,6 +89,7 @@
             font-size: 13pt;
             font-weight: bold;
             color: #000;
+            text-wrap: balance;
         }
 
         header a {
@@ -95,6 +122,8 @@
         #feed {
             max-width: 800px;
             padding: 10px;
+            content-visibility: auto;
+            contain-intrinsic-size: 800px 1000px;
         }
 
         .story {
@@ -106,7 +135,14 @@
 
         .new-stories-block {
             overflow: hidden;
-            transition: height 0.4s ease-out, opacity 0.3s ease-out;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+
+        .new-stories-block.is-visible {
+            opacity: 1;
+            transform: translateY(0);
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -119,12 +155,17 @@
             .new-stories-chip {
                 transition: none;
             }
+            .spinner {
+                animation: none;
+            }
         }
 
         .story-title {
             color: var(--link);
             text-decoration: none;
             line-height: 1.4;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .story-title:visited {
@@ -142,17 +183,14 @@
         }
 
         .story-meta {
+            display: block;
             font-size: 8pt;
             color: var(--text-muted);
+            text-decoration: none;
             margin-top: 4px;
         }
 
-        .story-meta a {
-            color: var(--text-muted);
-            text-decoration: none;
-        }
-
-        .story-meta a:hover {
+        .story-meta:hover {
             text-decoration: underline;
         }
 
@@ -220,6 +258,7 @@
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#feed">Skip to content</a>
     <header>
         <h1><a href="https://news.ycombinator.com/newest" target="_blank" rel="noopener">HN Live</a></h1>
         <div class="status">
@@ -232,8 +271,8 @@
         New stories (0)
     </button>
 
-    <main id="feed">
-        <div class="loading">Loading stories...</div>
+    <main id="feed" aria-live="polite" tabindex="-1">
+        <div class="loading">Loading stories&hellip;</div>
     </main>
     <div id="load-more"></div>
 
@@ -291,17 +330,20 @@
         }
 
         let { seenIds, newestTime, cachedStories } = loadState();
+        const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
         function formatTimeAgo(unixTime) {
             const seconds = Math.floor(Date.now() / 1000 - unixTime);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(seconds / 3600);
-            const days = Math.floor(seconds / 86400);
+            if (seconds < 60) return rtf.format(-seconds, 'second');
 
-            if (seconds < 60) return 'just now';
-            if (minutes < 60) return `${minutes} minutes ago`;
-            if (hours < 24) return `${hours} hours ago`;
-            return `${days} days ago`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return rtf.format(-minutes, 'minute');
+
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return rtf.format(-hours, 'hour');
+
+            const days = Math.floor(hours / 24);
+            return rtf.format(-days, 'day');
         }
 
         function extractDomain(url) {
@@ -380,11 +422,11 @@
                     <a class="story-title" href="${storyUrl}" target="_blank" rel="noopener">${escapeHtml(story.title)}</a>
                     ${domainSpan}
                 </div>
-                <div class="story-meta">
+                <a class="story-meta" href="${hnLink}" target="_blank" rel="noopener">
                     ${story.score} points by ${story.by}
                     <span class="time" data-time="${story.time}">${formatTimeAgo(story.time)}</span>
-                    | <a href="${hnLink}" target="_blank" rel="noopener">${commentCount} comments</a>
-                </div>
+                    | ${commentCount} comments
+                </a>
             `;
 
             return article;
@@ -404,17 +446,10 @@
                     wrapper.appendChild(createStoryElement(story));
                 }
 
-                // Start collapsed
-                wrapper.style.height = '0px';
-                wrapper.style.opacity = '0';
-
                 feed.insertBefore(wrapper, feed.firstChild);
 
-                // Measure and animate
-                const targetHeight = wrapper.scrollHeight;
                 requestAnimationFrame(() => {
-                    wrapper.style.height = targetHeight + 'px';
-                    wrapper.style.opacity = '1';
+                    wrapper.classList.add('is-visible');
                 });
 
                 // Unwrap after animation
@@ -423,7 +458,7 @@
                         feed.insertBefore(wrapper.firstChild, wrapper);
                     }
                     wrapper.remove();
-                }, 400);
+                }, 350);
             } else {
                 // No animation - just insert
                 const fragment = document.createDocumentFragment();
@@ -512,7 +547,7 @@
             if (isLoadingMore || loadedIndex >= allStoryIds.length) return;
 
             isLoadingMore = true;
-            loadMoreEl.innerHTML = '<span class="spinner"></span>Loading more...';
+            loadMoreEl.innerHTML = '<span class="spinner"></span>Loading more&hellip;';
 
             const nextIds = allStoryIds.slice(loadedIndex, loadedIndex + LOAD_MORE_COUNT);
             const stories = await fetchStories(nextIds);
