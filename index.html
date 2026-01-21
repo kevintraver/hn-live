@@ -635,12 +635,32 @@
             if (link) window.open(link.href, '_blank');
         }
 
+        let lastKey = '';
+        let lastKeyTime = 0;
+
         document.addEventListener('keydown', (e) => {
             // Ignore if typing in an input
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
             const stories = getStories();
             if (stories.length === 0) return;
+
+            const now = Date.now();
+
+            // Check for gg (go to top)
+            if (e.key === 'g') {
+                if (lastKey === 'g' && now - lastKeyTime < 500) {
+                    e.preventDefault();
+                    selectStory(0);
+                    lastKey = '';
+                    return;
+                }
+                lastKey = 'g';
+                lastKeyTime = now;
+                return;
+            }
+
+            lastKey = '';
 
             switch (e.key) {
                 case 'j':

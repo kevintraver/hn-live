@@ -20,6 +20,7 @@ A real-time feed of the newest stories from Hacker News.
 |-----|--------|
 | `j` | Select next story |
 | `k` | Select previous story |
+| `gg` | Go to top |
 | `Enter` | Open selected story |
 
 ## How it works
