@@ -8,10 +8,19 @@ A real-time feed of the newest stories from Hacker News.
 
 - **Live updates** - New stories appear automatically every 10 seconds
 - **Infinite scroll** - Load older stories as you scroll down
+- **Keyboard navigation** - j/k to navigate, Enter to open
 - **Offline resilient** - Cached stories display instantly on refresh
 - **Dark mode** - Follows system preference
 - **Accessible** - Skip links, reduced motion support, screen reader friendly
 - **Zero dependencies** - Single HTML file, vanilla JS
+
+## Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `j` | Select next story |
+| `k` | Select previous story |
+| `Enter` | Open selected story |
 
 ## How it works
 
