@@ -133,6 +133,12 @@
             scroll-margin-top: var(--scroll-offset);
         }
 
+        .story.is-selected {
+            background: var(--highlight);
+            margin: 0 -10px;
+            padding: 8px 10px;
+        }
+
         .new-stories-block {
             overflow: hidden;
             opacity: 0;
@@ -294,6 +300,7 @@
         let loadedIndex = 0;
         let isLoadingMore = false;
         let pendingNewCount = 0;
+        let selectedIndex = -1;
 
         function loadState() {
             const defaultState = { seenIds: new Set(), newestTime: 0, cachedStories: [] };
@@ -595,6 +602,62 @@
                 return;
             }
             updateNewStoriesChip();
+        });
+
+        function getStories() {
+            return feed.querySelectorAll('.story');
+        }
+
+        function selectStory(index) {
+            const stories = getStories();
+            if (stories.length === 0) return;
+
+            // Clamp index
+            index = Math.max(0, Math.min(index, stories.length - 1));
+
+            // Remove previous selection
+            const prev = feed.querySelector('.story.is-selected');
+            if (prev) prev.classList.remove('is-selected');
+
+            // Apply new selection
+            selectedIndex = index;
+            const story = stories[index];
+            story.classList.add('is-selected');
+            story.scrollIntoView({ behavior: getScrollBehavior(), block: 'nearest' });
+        }
+
+        function openSelected() {
+            const stories = getStories();
+            if (selectedIndex < 0 || selectedIndex >= stories.length) return;
+
+            const story = stories[selectedIndex];
+            const link = story.querySelector('.story-title');
+            if (link) window.open(link.href, '_blank');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            const stories = getStories();
+            if (stories.length === 0) return;
+
+            switch (e.key) {
+                case 'j':
+                    e.preventDefault();
+                    selectStory(selectedIndex + 1);
+                    break;
+                case 'k':
+                    e.preventDefault();
+                    selectStory(selectedIndex - 1);
+                    break;
+                case 'Enter':
+                    if (selectedIndex >= 0) {
+                        e.preventDefault();
+                        openSelected();
+                    }
+                    break;
+            }
         });
 
         async function init() {
